@@ -3,11 +3,12 @@ import Gurobi
 """
     ColumnGenerationSolver <: AbstractDARPSolver
 
-Solves DARP using a route-based (set partitioning) formulation with column generation.
+Solves DARP using a route-based (set covering) formulation with column generation.
 
-The LP relaxation of the restricted master problem is solved with Gurobi (dual simplex,
-warm-started re-solves). The pricing subproblem is solved via a forward SPPRC labeling
-algorithm. After LP convergence the master IP is solved over the final column pool.
+The LP relaxation of the restricted master problem (covering ≥ 1, no fleet constraint)
+is solved with Gurobi (dual simplex, warm-started re-solves). The pricing subproblem is
+solved via a forward SPPRC labeling algorithm. After LP convergence the master IP is
+solved over the final column pool.
 
 `solve_pricing` is exported and callable independently of a running model.
 """
@@ -51,7 +52,7 @@ function solve(solver::ColumnGenerationSolver, instance::DARPInstance; kwargs...
     solver.verbose && println("[CG] Initialized with $(length(pool.routes)) seed routes")
 
     env   = Gurobi.Env()
-    model, λ_vars, a_vars, cov_cons, fleet_con = build_rmp(instance, pool, env)
+    model, λ_vars, cov_cons = build_rmp(instance, pool, env)
 
     lp_obj = Inf
 
@@ -73,13 +74,9 @@ function solve(solver::ColumnGenerationSolver, instance::DARPInstance; kwargs...
 
         lp_obj = JuMP.objective_value(model)
 
-        art_sum = sum(JuMP.value(a_vars[i]) for i in 1:n)
-        if solver.verbose
-            art_str = art_sum > 1e-4 ? "  (artificials = $(round(art_sum, digits=4)))" : ""
-            println("[CG] Iter $iter: LP obj = $(round(lp_obj, digits=4))$art_str")
-        end
+        solver.verbose && println("[CG] Iter $iter: LP obj = $(round(lp_obj, digits=4))")
 
-        duals  = extract_duals(cov_cons, fleet_con)
+        duals  = extract_duals(cov_cons)
 
         # Budget pricing: leave at least 10s for the IP after CG convergence
         pricing_budget = max(1.0, (solver.time_limit_sec - (time() - t0) - 10.0) /
@@ -101,7 +98,7 @@ function solve(solver::ColumnGenerationSolver, instance::DARPInstance; kwargs...
         added = 0
         for route in new_routes
             any(r.cordeau_seq == route.cordeau_seq for r in pool.routes) && continue
-            add_column!(model, pool, route, cov_cons, fleet_con, λ_vars)
+            add_column!(model, pool, route, cov_cons, λ_vars)
             added += 1
         end
         solver.verbose && println("[CG]   Added $added new columns (pool size = $(length(pool.routes)))")
@@ -123,12 +120,9 @@ function solve(solver::ColumnGenerationSolver, instance::DARPInstance; kwargs...
         return build_solution(instance, selected, ip_obj, ip_status, elapsed)
     else
         # LP-only mode: report the LP lower bound with no primal integer solution.
-        # Subtract artificial contribution so the bound reflects real travel cost.
-        art_sum = sum(JuMP.value(a_vars[i]) for i in 1:n)
-        lp_bound = lp_obj - _ARTIFICIAL_M * art_sum
         return DARPSolution(instance,
             [Route(k, Int[], Float64[], Int[], Float64[], 0.0, 0.0) for k in 1:K],
-            lp_bound, false, "ColumnGenerationSolver", elapsed, :lp_relaxation)
+            lp_obj, false, "ColumnGenerationSolver", elapsed, :lp_relaxation)
     end
 end
 

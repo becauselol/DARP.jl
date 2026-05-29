@@ -10,4 +10,5 @@ const SMALL  = joinpath(FIXTURE_DIR, "small.txt")   # 4 requests, 2 vehicles —
     include("test_io.jl")
     include("test_solver_ip.jl")
     include("test_solver_cg.jl")
+    include("test_solver_sd_cg.jl")
 end

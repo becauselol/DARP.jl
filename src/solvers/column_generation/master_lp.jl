@@ -1,18 +1,12 @@
 import Gurobi
 
-# Large-M penalty for artificial variables. Ensures any real feasible route is
-# preferred over an artificial; must exceed the cost of the most expensive route.
-const _ARTIFICIAL_M = 1e6
-
 """
-    build_rmp(instance, pool, env) → (model, λ_vars, a_vars, cov_cons, fleet_con)
+    build_rmp(instance, pool, env) → (model, λ_vars, cov_cons)
 
 Build the LP relaxation of the restricted master problem using Gurobi.
 
-Uses the partitioning formulation (= 1) + fleet constraint (≤ K). An artificial
-variable a_i ≥ 0 at cost M is added to each coverage constraint so the LP is
-always feasible regardless of fleet size and initial column pool. If at LP
-optimality Σ a_i > 0, the DARP instance is infeasible for the given K.
+Uses the covering formulation (≥ 1) with no fleet constraint. With single-request seed
+routes the LP is always feasible.
 
 `env` is a shared `Gurobi.Env` to avoid per-model license acquisition overhead.
 """
@@ -22,7 +16,6 @@ function build_rmp(
     env      :: Gurobi.Env
 )
     n = instance.n
-    K = instance.K
     R = length(pool.routes)
 
     model = JuMP.Model(() -> Gurobi.Optimizer(env))
@@ -33,24 +26,15 @@ function build_rmp(
     # LP relaxation: λ ∈ [0,1]
     λ_vars = @variable(model, 0 <= λ[1:R] <= 1)
 
-    # Artificial variables a_i ≥ 0 at cost M (one per coverage constraint).
-    # Initial LP basis: all λ = 0, all a_i = 1 → partitioning satisfied trivially.
-    a_vars = @variable(model, 0 <= a[1:n])
-
-    # Partitioning: Σ_{r:i∈r} λ_r + a_i = 1 for each request i
+    # Covering: Σ_{r:i∈r} λ_r ≥ 1 for each request i
     cov_cons = [@constraint(model,
-        sum(λ[r] for r in 1:R if i in pool.routes[r].request_ids) + a[i] == 1.0)
+        sum(λ[r] for r in 1:R if i in pool.routes[r].request_ids) >= 1.0)
         for i in 1:n]
 
-    # Fleet: total routes activated ≤ K
-    fleet_con = @constraint(model, sum(λ[r] for r in 1:R) <= Float64(K))
-
-    # Objective: minimize real travel cost + M·artificials
     @objective(model, Min,
-        sum(pool.routes[r].cost * λ[r] for r in 1:R) +
-        _ARTIFICIAL_M * sum(a[i] for i in 1:n))
+        sum(pool.routes[r].cost * λ[r] for r in 1:R))
 
-    return model, λ_vars, a_vars, cov_cons, fleet_con
+    return model, λ_vars, cov_cons
 end
 
 """
@@ -68,34 +52,31 @@ function solve_rmp!(model::JuMP.Model) :: Symbol
 end
 
 """
-    extract_duals(cov_cons, fleet_con) → CGDuals
+    extract_duals(cov_cons) → CGDuals
 
 Extract dual variables from the LP relaxation after solving.
-`pi[i]` is the coverage dual (unrestricted in sign).
-`mu` is the fleet dual (≤ 0 at optimality for a minimization ≤ constraint).
+`pi[i]` is the coverage dual (≥ 0 for a ≥ constraint in minimization).
+`mu` is always 0.0 (no fleet constraint).
 """
 function extract_duals(
-    cov_cons  :: Vector{<:JuMP.ConstraintRef},
-    fleet_con :: JuMP.ConstraintRef
+    cov_cons :: Vector{<:JuMP.ConstraintRef}
 ) :: CGDuals
     pi = [JuMP.dual(c) for c in cov_cons]
-    mu = JuMP.dual(fleet_con)
-    return CGDuals(pi, mu)
+    return CGDuals(pi, 0.0)
 end
 
 """
-    add_column!(model, pool, route, cov_cons, fleet_con, λ_vars)
+    add_column!(model, pool, route, cov_cons, λ_vars)
 
 Hot-add a column to the existing model without rebuilding.
 Gurobi preserves the simplex basis enabling warm-start dual simplex re-solves.
 """
 function add_column!(
-    model     :: JuMP.Model,
-    pool      :: ColumnPool,
-    route     :: FeasibleRoute,
-    cov_cons  :: Vector{<:JuMP.ConstraintRef},
-    fleet_con :: JuMP.ConstraintRef,
-    λ_vars    :: Vector{JuMP.VariableRef}
+    model    :: JuMP.Model,
+    pool     :: ColumnPool,
+    route    :: FeasibleRoute,
+    cov_cons :: Vector{<:JuMP.ConstraintRef},
+    λ_vars   :: Vector{JuMP.VariableRef}
 ) :: JuMP.VariableRef
     push!(pool.routes, route)
 
@@ -107,7 +88,6 @@ function add_column!(
     for i in route.request_ids
         JuMP.set_normalized_coefficient(cov_cons[i], new_λ, 1.0)
     end
-    JuMP.set_normalized_coefficient(fleet_con, new_λ, 1.0)
 
     return new_λ
 end
