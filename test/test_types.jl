@@ -42,7 +42,8 @@
         # Minimal check that the struct is accessible; content tested in test_solver_ip.jl
         @test fieldnames(DARPSolution) == (
             :instance, :routes, :objective_value, :is_feasible,
-            :solver_name, :solve_time_sec, :status)
+            :solver_name, :solve_time_sec, :status,
+            :lp_bound, :n_cg_iters, :iter_log)
     end
 
 end

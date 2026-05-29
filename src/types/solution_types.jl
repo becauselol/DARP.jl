@@ -15,11 +15,19 @@ mutable struct Route
     total_duration :: Float64
 end
 
+# Per-iteration record for CG solvers: LP objective and columns added that iteration.
+const CGIterLogEntry = NamedTuple{(:iter, :lp_obj, :cols_added), Tuple{Int, Float64, Int}}
+
 """
     DARPSolution
 
 Complete solution for a DARPInstance.
 `status` is one of: :optimal, :feasible, :infeasible, :timeout, :error.
+
+Extended fields (populated by solvers that support them; NaN / 0 / empty otherwise):
+- `lp_bound`     : LP relaxation lower bound (objective_bound for MIP; final LP obj for CG).
+- `n_cg_iters`   : Number of CG pricing iterations performed.
+- `iter_log`     : Per-iteration LP objective and columns added (CG solvers only).
 """
 struct DARPSolution
     instance        :: DARPInstance
@@ -29,4 +37,12 @@ struct DARPSolution
     solver_name     :: String
     solve_time_sec  :: Float64
     status          :: Symbol
+    lp_bound        :: Float64
+    n_cg_iters      :: Int
+    iter_log        :: Vector{CGIterLogEntry}
 end
+
+# Backward-compatible constructor used by all existing solvers.
+DARPSolution(instance, routes, obj, is_feas, solver, time, status) =
+    DARPSolution(instance, routes, obj, is_feas, solver, time, status,
+                 NaN, 0, CGIterLogEntry[])
