@@ -2,8 +2,10 @@
     solve_sd_demand_master_ip(instance, pool, env, time_limit_sec, mip_gap, verbose)
         → (status::Symbol, obj::Float64, selected::Vector{SplitDemandRoute})
 
-Binary covering MIP over the final split-demand column pool.
+Nonneg-integer covering MIP over the final split-demand column pool.
 Coverage: Σ_{r:i∈r} α_{ir} · λ_r ≥ D_i  (integer coefficients α_{ir} ≤ min(D_i, Q)).
+λ_r ≥ 0 integer (not binary): allows multiple vehicles to operate the same route,
+guaranteeing feasibility whenever seed routes cover all demands.
 """
 function solve_sd_demand_master_ip(
     instance       :: DARPInstance,
@@ -22,7 +24,7 @@ function solve_sd_demand_master_ip(
     JuMP.set_optimizer_attribute(model, "MIPGap",     mip_gap)
     JuMP.set_optimizer_attribute(model, "OutputFlag", verbose ? 1 : 0)
 
-    @variable(model, λ[1:R], Bin)
+    @variable(model, λ[1:R] >= 0, Int)
 
     for i in 1:n
         @constraint(model,

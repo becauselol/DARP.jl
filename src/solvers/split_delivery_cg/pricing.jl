@@ -1,12 +1,17 @@
 """
     solve_nocap_pricing(instance, duals; detour_factor, rc_tolerance, max_routes, time_limit)
-        → Vector{SplitDeliveryNoCapRoute}
+        → (Vector{SplitDeliveryNoCapRoute}, Bool)
 
 SPPRC pricing subproblem for the uncapped split-delivery CG model.
 
 Vehicle capacity is not enforced. At every pickup i the route boards D_i units
 (full demand), so the reduced-cost contribution is −D_i · π_i.
-Returned routes are sorted ascending by reduced cost.
+
+Returns `(routes, exhausted)`:
+- `routes`    — negative-reduced-cost routes sorted ascending by reduced cost
+- `exhausted` — true iff the DFS completed without hitting the time limit (open stack
+                empty at exit). Only when exhausted=true AND routes is empty can the
+                caller conclude no improving column exists and the LP is optimal.
 """
 function solve_nocap_pricing(
     instance      :: DARPInstance,
@@ -15,7 +20,7 @@ function solve_nocap_pricing(
     rc_tolerance  :: Float64 = -1e-6,
     max_routes    :: Int     = 10,
     time_limit    :: Float64 = 60.0
-) :: Vector{SplitDeliveryNoCapRoute}
+) :: Tuple{Vector{SplitDeliveryNoCapRoute}, Bool}
     n      = instance.n
     T      = instance.T
     L      = instance.L
@@ -120,6 +125,8 @@ function solve_nocap_pricing(
         end
     end
 
+    exhausted = isempty(open_stack)  # true iff DFS ran to completion, not cut by time limit
+
     results = SplitDeliveryNoCapRoute[]
     for lbl in completed
         lbl.rc >= rc_tolerance && continue
@@ -127,7 +134,7 @@ function solve_nocap_pricing(
     end
 
     sort!(results, by = r -> r.reduced_cost)
-    return results[1:min(max_routes, length(results))]
+    return results[1:min(max_routes, length(results))], exhausted
 end
 
 # ── Internal helpers ───────────────────────────────────────────────────────────

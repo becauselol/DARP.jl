@@ -1,5 +1,5 @@
 """
-    solve_split_demand_pricing(instance, duals; ...) → Vector{SplitDemandRoute}
+    solve_split_demand_pricing(instance, duals; ...) → (Vector{SplitDemandRoute}, Bool)
 
 SPPRC pricing subproblem for the capacity-aware split-demand CG model.
 
@@ -8,7 +8,11 @@ enumerates every feasible boarding amount α = 1…min(Q − current_load, D_i),
 one child label per value. This generates routes with varying α_ir coefficients that
 are used as column coefficients in the master LP coverage constraint Σ α_ir λ_r ≥ D_i.
 
-Returned routes are sorted ascending by reduced cost.
+Returns `(routes, exhausted)`:
+- `routes`    — negative-reduced-cost routes found, sorted ascending by reduced cost
+- `exhausted` — true iff the DFS completed without hitting the time limit (open stack
+                empty at exit). Only when exhausted=true AND routes is empty can the
+                caller conclude no improving column exists and the LP is optimal.
 """
 function solve_split_demand_pricing(
     instance      :: DARPInstance,
@@ -17,7 +21,7 @@ function solve_split_demand_pricing(
     rc_tolerance  :: Float64 = -1e-6,
     max_routes    :: Int     = 10,
     time_limit    :: Float64 = 60.0
-) :: Vector{SplitDemandRoute}
+) :: Tuple{Vector{SplitDemandRoute}, Bool}
     n      = instance.n
     Q      = instance.Q
     T      = instance.T
@@ -181,6 +185,8 @@ function solve_split_demand_pricing(
         end
     end
 
+    exhausted = isempty(open_stack)  # true iff DFS ran to completion, not cut by time limit
+
     results = SplitDemandRoute[]
     for lbl in completed
         lbl.rc >= rc_tolerance && continue
@@ -188,7 +194,7 @@ function solve_split_demand_pricing(
     end
 
     sort!(results, by = r -> r.reduced_cost)
-    return results[1:min(max_routes, length(results))]
+    return results[1:min(max_routes, length(results))], exhausted
 end
 
 # ── Internal helpers ───────────────────────────────────────────────────────────

@@ -32,3 +32,8 @@ test/fixtures/generated/
 
 # Benchmark outputs (written by scripts/run_benchmark.jl)
 results/
+
+data/
+experiments/
+*.err
+*.out

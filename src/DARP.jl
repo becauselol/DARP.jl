@@ -31,7 +31,7 @@ export solve_split_demand_pricing
 
 # ── Benchmarking ──────────────────────────────────────────────────────────────
 export BenchmarkResult, run_benchmark, run_benchmark_suite
-export write_benchmark_csv, print_benchmark_table
+export write_benchmark_csv, write_iter_log_csv, print_benchmark_table
 
 include("types/node_types.jl")
 include("types/request_types.jl")

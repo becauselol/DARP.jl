@@ -13,32 +13,38 @@ Pricing subproblem: forward SPPRC with greedy α computation at each pickup exte
 After LP convergence, a binary covering MIP is solved over the final column pool.
 """
 struct SplitDeliveryNoCapCGSolver <: AbstractDARPSolver
-    time_limit_sec      :: Float64
-    max_cg_iters        :: Int
-    mip_gap             :: Float64
-    verbose             :: Bool
-    detour_factor       :: Float64
-    solve_ip            :: Bool
-    max_routes_per_iter :: Int
-    rc_tolerance        :: Float64
+    time_limit_sec        :: Float64
+    max_cg_iters          :: Int
+    mip_gap               :: Float64
+    verbose               :: Bool
+    detour_factor         :: Float64
+    solve_ip              :: Bool
+    max_routes_per_iter   :: Int
+    rc_tolerance          :: Float64
+    pricing_time_per_iter :: Float64  # fixed per-iteration pricing budget (seconds)
+    patience              :: Int      # consecutive exhausted-zero iterations to declare LP optimal
 end
 
 function SplitDeliveryNoCapCGSolver(;
-    time_limit_sec      :: Float64 = 3600.0,
-    max_cg_iters        :: Int     = 500,
-    mip_gap             :: Float64 = 1e-4,
-    verbose             :: Bool    = false,
-    detour_factor       :: Float64 = Inf,
-    solve_ip            :: Bool    = true,
-    max_routes_per_iter :: Int     = 10,
-    rc_tolerance        :: Float64 = -1e-6
+    time_limit_sec        :: Float64 = 3600.0,
+    max_cg_iters          :: Int     = 10_000,
+    mip_gap               :: Float64 = 1e-4,
+    verbose               :: Bool    = false,
+    detour_factor         :: Float64 = Inf,
+    solve_ip              :: Bool    = true,
+    max_routes_per_iter   :: Int     = 10,
+    rc_tolerance          :: Float64 = -1e-6,
+    pricing_time_per_iter :: Float64 = 30.0,
+    patience              :: Int     = 3
 ) :: SplitDeliveryNoCapCGSolver
     detour_factor >= 1.0 || throw(ArgumentError("detour_factor must be ≥ 1.0"))
     time_limit_sec > 0   || throw(ArgumentError("time_limit_sec must be > 0"))
     max_cg_iters > 0     || throw(ArgumentError("max_cg_iters must be > 0"))
+    patience > 0         || throw(ArgumentError("patience must be > 0"))
     return SplitDeliveryNoCapCGSolver(
         time_limit_sec, max_cg_iters, mip_gap, verbose,
-        detour_factor, solve_ip, max_routes_per_iter, rc_tolerance
+        detour_factor, solve_ip, max_routes_per_iter, rc_tolerance,
+        pricing_time_per_iter, patience
     )
 end
 
@@ -53,7 +59,9 @@ function solve(solver::SplitDeliveryNoCapCGSolver, instance::DARPInstance; kwarg
     env   = Gurobi.Env()
     model, λ_vars, cov_cons = build_sd_rmp(instance, pool, env)
 
-    lp_obj = Inf
+    lp_obj            = Inf
+    no_improve        = 0
+    lp_proven_optimal = false
 
     for iter in 1:solver.max_cg_iters
         remaining = solver.time_limit_sec - (time() - t0)
@@ -75,10 +83,10 @@ function solve(solver::SplitDeliveryNoCapCGSolver, instance::DARPInstance; kwarg
 
         duals = extract_sd_duals(cov_cons)
 
-        pricing_budget = max(1.0, (solver.time_limit_sec - (time() - t0) - 10.0) /
-                                   max(1, solver.max_cg_iters - iter + 1))
+        remaining      = solver.time_limit_sec - (time() - t0) - 10.0
+        pricing_budget = max(1.0, min(solver.pricing_time_per_iter, remaining))
 
-        new_routes = solve_nocap_pricing(
+        new_routes, pricing_exhausted = solve_nocap_pricing(
             instance, duals;
             detour_factor = solver.detour_factor,
             rc_tolerance  = solver.rc_tolerance,
@@ -86,21 +94,27 @@ function solve(solver::SplitDeliveryNoCapCGSolver, instance::DARPInstance; kwarg
             time_limit    = pricing_budget
         )
 
-        if isempty(new_routes)
-            solver.verbose && println("[SD-CG] No improving columns — LP optimal after $iter iterations")
-            break
-        end
-
         added = 0
         for route in new_routes
-            # Same path → same greedy alpha → skip duplicates
             any(r.cordeau_seq == route.cordeau_seq for r in pool.routes) && continue
             add_sd_column!(model, pool, route, cov_cons, λ_vars)
             added += 1
         end
         solver.verbose && println("[SD-CG]   Added $added new columns (pool = $(length(pool.routes)))")
 
-        added == 0 && break
+        if added > 0
+            no_improve = 0
+        elseif pricing_exhausted
+            no_improve += 1
+            solver.verbose && println("[SD-CG]   Pricing exhausted, no columns ($no_improve/$(solver.patience))")
+            if no_improve >= solver.patience
+                lp_proven_optimal = true
+                solver.verbose && println("[SD-CG] LP proven optimal after $iter iterations")
+                break
+            end
+        else
+            solver.verbose && println("[SD-CG]   Pricing timed out, no columns (not counting toward patience)")
+        end
     end
 
     elapsed = time() - t0
@@ -111,6 +125,9 @@ function solve(solver::SplitDeliveryNoCapCGSolver, instance::DARPInstance; kwarg
             instance, pool, env, ip_budget, solver.mip_gap, solver.verbose
         )
         elapsed = time() - t0
+        if !lp_proven_optimal && ip_status == :optimal
+            ip_status = :feasible
+        end
         return build_sd_solution(instance, selected, ip_obj, ip_status, elapsed)
     else
         return DARPSolution(instance,
