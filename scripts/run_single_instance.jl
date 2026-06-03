@@ -38,7 +38,7 @@ const CG_PATIENCE       = parse(Int,     get(ENV, "DARP_CG_PATIENCE",         "3
 const CG_TIMEOUT_PAT    = parse(Int,     get(ENV, "DARP_CG_TIMEOUT_PATIENCE", "10"))
 const IP_TIME_LIMIT     = parse(Float64, get(ENV, "DARP_IP_TIME_LIMIT",       "1800"))
 
-const VALID = ("DemandCG", "DemandIP", "NoCapCG", "NoCapIP")
+const VALID = ("DemandCG", "DemandIP", "NoCapCG", "NoCapIP", "NoDepotNoCap", "NoDepotDemand")
 SOLVER_LABEL in VALID || error("Unknown solver '$SOLVER_LABEL'. Choose from: $(join(VALID, ", "))")
 
 isfile(INST_PATH) || error("Instance file not found: $INST_PATH")
@@ -93,6 +93,30 @@ function make_solver(label)
         )
     elseif label == "NoCapIP"
         return SplitDeliveryNoCapIPSolver(time_limit_sec=TIME_LIMIT, verbose=false)
+    elseif label == "NoDepotNoCap"
+        return NoDepotNoCapCGSolver(
+            time_limit_sec        = TIME_LIMIT,
+            max_cg_iters          = MAX_CG_ITERS,
+            verbose               = false,
+            solve_ip              = true,
+            max_routes_per_iter   = 20,
+            pricing_time_per_iter = PRICING_TIME,
+            patience              = CG_PATIENCE,
+            timeout_patience      = CG_TIMEOUT_PAT,
+            ip_time_limit_sec     = IP_TIME_LIMIT
+        )
+    elseif label == "NoDepotDemand"
+        return NoDepotDemandCGSolver(
+            time_limit_sec        = TIME_LIMIT,
+            max_cg_iters          = MAX_CG_ITERS,
+            verbose               = false,
+            solve_ip              = true,
+            max_routes_per_iter   = 20,
+            pricing_time_per_iter = PRICING_TIME,
+            patience              = CG_PATIENCE,
+            timeout_patience      = CG_TIMEOUT_PAT,
+            ip_time_limit_sec     = IP_TIME_LIMIT
+        )
     end
 end
 
