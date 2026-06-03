@@ -23,6 +23,8 @@ struct SplitDeliveryNoCapCGSolver <: AbstractDARPSolver
     rc_tolerance          :: Float64
     pricing_time_per_iter :: Float64  # fixed per-iteration pricing budget (seconds)
     patience              :: Int      # consecutive exhausted-zero iterations to declare LP optimal
+    timeout_patience      :: Int      # consecutive timed-out-zero iterations before heuristic termination
+    ip_time_limit_sec     :: Float64  # independent time budget for the final IP solve
 end
 
 function SplitDeliveryNoCapCGSolver(;
@@ -35,16 +37,20 @@ function SplitDeliveryNoCapCGSolver(;
     max_routes_per_iter   :: Int     = 10,
     rc_tolerance          :: Float64 = -1e-6,
     pricing_time_per_iter :: Float64 = 30.0,
-    patience              :: Int     = 3
+    patience              :: Int     = 3,
+    timeout_patience      :: Int     = 10,
+    ip_time_limit_sec     :: Float64 = 1800.0
 ) :: SplitDeliveryNoCapCGSolver
-    detour_factor >= 1.0 || throw(ArgumentError("detour_factor must be ≥ 1.0"))
-    time_limit_sec > 0   || throw(ArgumentError("time_limit_sec must be > 0"))
-    max_cg_iters > 0     || throw(ArgumentError("max_cg_iters must be > 0"))
-    patience > 0         || throw(ArgumentError("patience must be > 0"))
+    detour_factor >= 1.0   || throw(ArgumentError("detour_factor must be ≥ 1.0"))
+    time_limit_sec > 0     || throw(ArgumentError("time_limit_sec must be > 0"))
+    max_cg_iters > 0       || throw(ArgumentError("max_cg_iters must be > 0"))
+    patience > 0           || throw(ArgumentError("patience must be > 0"))
+    timeout_patience > 0   || throw(ArgumentError("timeout_patience must be > 0"))
+    ip_time_limit_sec > 0  || throw(ArgumentError("ip_time_limit_sec must be > 0"))
     return SplitDeliveryNoCapCGSolver(
         time_limit_sec, max_cg_iters, mip_gap, verbose,
         detour_factor, solve_ip, max_routes_per_iter, rc_tolerance,
-        pricing_time_per_iter, patience
+        pricing_time_per_iter, patience, timeout_patience, ip_time_limit_sec
     )
 end
 
@@ -59,9 +65,10 @@ function solve(solver::SplitDeliveryNoCapCGSolver, instance::DARPInstance; kwarg
     env   = Gurobi.Env()
     model, λ_vars, cov_cons = build_sd_rmp(instance, pool, env)
 
-    lp_obj            = Inf
-    no_improve        = 0
-    lp_proven_optimal = false
+    lp_obj             = Inf
+    no_improve         = 0
+    no_improve_timeout = 0
+    lp_proven_optimal  = false
 
     for iter in 1:solver.max_cg_iters
         remaining = solver.time_limit_sec - (time() - t0)
@@ -83,7 +90,7 @@ function solve(solver::SplitDeliveryNoCapCGSolver, instance::DARPInstance; kwarg
 
         duals = extract_sd_duals(cov_cons)
 
-        remaining      = solver.time_limit_sec - (time() - t0) - 10.0
+        remaining      = solver.time_limit_sec - (time() - t0)
         pricing_budget = max(1.0, min(solver.pricing_time_per_iter, remaining))
 
         new_routes, pricing_exhausted = solve_nocap_pricing(
@@ -103,9 +110,12 @@ function solve(solver::SplitDeliveryNoCapCGSolver, instance::DARPInstance; kwarg
         solver.verbose && println("[SD-CG]   Added $added new columns (pool = $(length(pool.routes)))")
 
         if added > 0
-            no_improve = 0
+            no_improve         = 0
+            no_improve_timeout = 0
         elseif pricing_exhausted
+            # Pricing ran to completion and found no improving column — real LP optimality evidence.
             no_improve += 1
+            no_improve_timeout = 0
             solver.verbose && println("[SD-CG]   Pricing exhausted, no columns ($no_improve/$(solver.patience))")
             if no_improve >= solver.patience
                 lp_proven_optimal = true
@@ -113,14 +123,20 @@ function solve(solver::SplitDeliveryNoCapCGSolver, instance::DARPInstance; kwarg
                 break
             end
         else
-            solver.verbose && println("[SD-CG]   Pricing timed out, no columns (not counting toward patience)")
+            # Pricing hit the time limit with no columns — inconclusive, but track streak.
+            no_improve_timeout += 1
+            solver.verbose && println("[SD-CG]   Pricing timed out, no columns ($no_improve_timeout/$(solver.timeout_patience))")
+            if no_improve_timeout >= solver.timeout_patience
+                solver.verbose && println("[SD-CG] Timeout patience exhausted after $iter iterations — terminating")
+                break
+            end
         end
     end
 
     elapsed = time() - t0
 
     if solver.solve_ip
-        ip_budget = max(10.0, solver.time_limit_sec - elapsed)
+        ip_budget = solver.ip_time_limit_sec
         ip_status, ip_obj, selected = solve_sd_master_ip(
             instance, pool, env, ip_budget, solver.mip_gap, solver.verbose
         )
