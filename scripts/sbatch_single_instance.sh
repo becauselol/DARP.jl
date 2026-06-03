@@ -5,13 +5,13 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=32G
-#SBATCH --time=01:00:00
+#SBATCH --time=02:30:00
 #SBATCH --output=/dev/null
 #SBATCH --error=/dev/null
 
 # Generic single-instance SLURM array job.
 # Each task reads one line from the job list and solves exactly one (solver, instance) pair.
-# Wall time per task ≤ DARP_TIME_LIMIT + ~10 min overhead.
+# Wall time per task ≤ DARP_TIME_LIMIT + ~20 min overhead (Julia startup + depot copy).
 #
 # Usage (submit from repo root):
 #   sbatch --array=1-<N> \
@@ -79,14 +79,18 @@ echo ""
 
 cd "$PROJECT_ROOT"
 
-export DARP_TIME_LIMIT="${DARP_TIME_LIMIT:-1200}"
-export DARP_PRICING_TIME="${DARP_PRICING_TIME:-30}"
+export DARP_TIME_LIMIT="${DARP_TIME_LIMIT:-3600}"
+export DARP_IP_TIME_LIMIT="${DARP_IP_TIME_LIMIT:-1800}"
+export DARP_PRICING_TIME="${DARP_PRICING_TIME:-60}"
 export DARP_CG_PATIENCE="${DARP_CG_PATIENCE:-3}"
+export DARP_CG_TIMEOUT_PATIENCE="${DARP_CG_TIMEOUT_PATIENCE:-10}"
 
 echo "===== Settings ====="
-echo "  DARP_TIME_LIMIT   = ${DARP_TIME_LIMIT}s"
-echo "  DARP_PRICING_TIME = ${DARP_PRICING_TIME}s"
-echo "  DARP_CG_PATIENCE  = ${DARP_CG_PATIENCE}"
+echo "  DARP_TIME_LIMIT           = ${DARP_TIME_LIMIT}s  (CG phase)"
+echo "  DARP_IP_TIME_LIMIT        = ${DARP_IP_TIME_LIMIT}s  (IP phase)"
+echo "  DARP_PRICING_TIME         = ${DARP_PRICING_TIME}s"
+echo "  DARP_CG_PATIENCE          = ${DARP_CG_PATIENCE}"
+echo "  DARP_CG_TIMEOUT_PATIENCE  = ${DARP_CG_TIMEOUT_PATIENCE}"
 echo ""
 
 echo "===== Running ====="

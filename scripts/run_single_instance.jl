@@ -12,10 +12,12 @@ Output:
     <base_outdir>/<solver>/<instance_name>_iters.csv — CG iteration log (CG solvers only)
 
 Environment variables:
-    DARP_TIME_LIMIT       — solve time limit in seconds (default: 1200)
-    DARP_MAX_CG_ITERS     — max CG iterations (default: 10000)
-    DARP_PRICING_TIME     — per-iteration pricing budget in seconds (default: 30)
-    DARP_CG_PATIENCE      — consecutive exhausted-zero iterations to declare LP optimal (default: 3)
+    DARP_TIME_LIMIT           — CG phase time limit in seconds (default: 1200)
+    DARP_MAX_CG_ITERS         — max CG iterations (default: 10000)
+    DARP_PRICING_TIME         — per-iteration pricing budget in seconds (default: 30)
+    DARP_CG_PATIENCE          — consecutive exhausted-zero iterations to declare LP optimal (default: 3)
+    DARP_CG_TIMEOUT_PATIENCE  — consecutive timed-out-zero iterations before heuristic termination (default: 10)
+    DARP_IP_TIME_LIMIT        — independent IP phase time limit in seconds (default: 1800)
 """
 
 import Pkg
@@ -29,10 +31,12 @@ const BASE_OUTDIR   = ARGS[1]
 const SOLVER_LABEL  = ARGS[2]
 const INST_PATH     = ARGS[3]
 
-const TIME_LIMIT    = parse(Float64, get(ENV, "DARP_TIME_LIMIT",   "1200"))
-const MAX_CG_ITERS  = parse(Int,     get(ENV, "DARP_MAX_CG_ITERS", "10000"))
-const PRICING_TIME  = parse(Float64, get(ENV, "DARP_PRICING_TIME", "30.0"))
-const CG_PATIENCE   = parse(Int,     get(ENV, "DARP_CG_PATIENCE",  "3"))
+const TIME_LIMIT        = parse(Float64, get(ENV, "DARP_TIME_LIMIT",          "1200"))
+const MAX_CG_ITERS      = parse(Int,     get(ENV, "DARP_MAX_CG_ITERS",        "10000"))
+const PRICING_TIME      = parse(Float64, get(ENV, "DARP_PRICING_TIME",        "30.0"))
+const CG_PATIENCE       = parse(Int,     get(ENV, "DARP_CG_PATIENCE",         "3"))
+const CG_TIMEOUT_PAT    = parse(Int,     get(ENV, "DARP_CG_TIMEOUT_PATIENCE", "10"))
+const IP_TIME_LIMIT     = parse(Float64, get(ENV, "DARP_IP_TIME_LIMIT",       "1800"))
 
 const VALID = ("DemandCG", "DemandIP", "NoCapCG", "NoCapIP")
 SOLVER_LABEL in VALID || error("Unknown solver '$SOLVER_LABEL'. Choose from: $(join(VALID, ", "))")
@@ -69,17 +73,23 @@ function make_solver(label)
             solve_ip              = true,
             max_routes_per_iter   = 20,
             pricing_time_per_iter = PRICING_TIME,
-            patience              = CG_PATIENCE
+            patience              = CG_PATIENCE,
+            timeout_patience      = CG_TIMEOUT_PAT,
+            ip_time_limit_sec     = IP_TIME_LIMIT
         )
     elseif label == "DemandIP"
-        return SplitDemandIPSolver(time_limit_sec=TIME_LIMIT, verbose=false)
+        return SplitDemandIPSolver(time_limit_sec=IP_TIME_LIMIT, verbose=false)
     elseif label == "NoCapCG"
         return SplitDeliveryNoCapCGSolver(
-            time_limit_sec      = TIME_LIMIT,
-            max_cg_iters        = MAX_CG_ITERS,
-            verbose             = false,
-            solve_ip            = true,
-            max_routes_per_iter = 20
+            time_limit_sec        = TIME_LIMIT,
+            max_cg_iters          = MAX_CG_ITERS,
+            verbose               = false,
+            solve_ip              = true,
+            max_routes_per_iter   = 20,
+            pricing_time_per_iter = PRICING_TIME,
+            patience              = CG_PATIENCE,
+            timeout_patience      = CG_TIMEOUT_PAT,
+            ip_time_limit_sec     = IP_TIME_LIMIT
         )
     elseif label == "NoCapIP"
         return SplitDeliveryNoCapIPSolver(time_limit_sec=TIME_LIMIT, verbose=false)
