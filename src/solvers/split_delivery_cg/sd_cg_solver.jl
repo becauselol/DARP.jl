@@ -66,6 +66,8 @@ function solve(solver::SplitDeliveryNoCapCGSolver, instance::DARPInstance; kwarg
     model, λ_vars, cov_cons = build_sd_rmp(instance, pool, env)
 
     lp_obj             = Inf
+    iter_log           = CGIterLogEntry[]
+    n_iters            = 0
     no_improve         = 0
     no_improve_timeout = 0
     lp_proven_optimal  = false
@@ -82,10 +84,12 @@ function solve(solver::SplitDeliveryNoCapCGSolver, instance::DARPInstance; kwarg
             elapsed = time() - t0
             return DARPSolution(instance,
                 [Route(k, Int[], Float64[], Int[], Float64[], 0.0, 0.0) for k in 1:K],
-                Inf, false, "SplitDeliveryNoCapCGSolver", elapsed, :infeasible)
+                Inf, false, "SplitDeliveryNoCapCGSolver", elapsed, :infeasible,
+                NaN, iter, iter_log)
         end
 
-        lp_obj = JuMP.objective_value(model)
+        lp_obj  = JuMP.objective_value(model)
+        n_iters = iter
         solver.verbose && println("[SD-CG] Iter $iter: LP obj = $(round(lp_obj, digits=4))")
 
         duals = extract_sd_duals(cov_cons)
@@ -107,6 +111,8 @@ function solve(solver::SplitDeliveryNoCapCGSolver, instance::DARPInstance; kwarg
             add_sd_column!(model, pool, route, cov_cons, λ_vars)
             added += 1
         end
+
+        push!(iter_log, (iter=iter, lp_obj=lp_obj, cols_added=added))
         solver.verbose && println("[SD-CG]   Added $added new columns (pool = $(length(pool.routes)))")
 
         if added > 0
@@ -144,11 +150,13 @@ function solve(solver::SplitDeliveryNoCapCGSolver, instance::DARPInstance; kwarg
         if !lp_proven_optimal && ip_status == :optimal
             ip_status = :feasible
         end
-        return build_sd_solution(instance, selected, ip_obj, ip_status, elapsed)
+        return build_sd_solution(instance, selected, ip_obj, ip_status, elapsed,
+                                 lp_obj, n_iters, iter_log)
     else
         return DARPSolution(instance,
             [Route(k, Int[], Float64[], Int[], Float64[], 0.0, 0.0) for k in 1:K],
-            lp_obj, false, "SplitDeliveryNoCapCGSolver", elapsed, :lp_relaxation)
+            lp_obj, false, "SplitDeliveryNoCapCGSolver", elapsed, :lp_relaxation,
+            lp_obj, n_iters, iter_log)
     end
 end
 
