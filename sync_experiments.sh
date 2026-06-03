@@ -29,7 +29,7 @@ fi
 RSYNC_OPTS=(-avz
   --exclude="archived/"
   --exclude="instances/"
-  --exclude="*.jl"
+  --exclude="jobs.txt"
 )
 
 if [ "$INCLUDE_LOGS" = false ]; then

@@ -8,7 +8,9 @@ Usage:
 
     If no args, searches experiments/cg_vs_ip_small/run_*/ and experiments/cg_large/run_*/
 
-Outputs (written to scripts/analysis/plots/):
+    Plots are written to experiments/plots/ (next to the experiment dirs, not in scripts/).
+
+Outputs:
     convergence_by_size.png       — LP obj vs iter, one panel per (n, variant)
     convergence_normalized.png    — (LP obj - LP_final) / (LP_iter1 - LP_final) vs iter
     cols_added.png                — columns added per iteration
@@ -85,7 +87,7 @@ iters = iters.merge(
     on="instance", how="left"
 )
 
-out_dir = os.path.join(os.path.dirname(__file__), "plots")
+out_dir = os.path.join(repo, "experiments", "plots")
 os.makedirs(out_dir, exist_ok=True)
 
 SEED_COLORS = {42: "#e41a1c", 123: "#377eb8", 999: "#4daf4a"}
