@@ -28,6 +28,9 @@ export SplitDemandIPSolver
 export SplitDemandCGSolver
 export SplitDemandRoute, SplitDemandDuals, SplitDemandPool
 export solve_split_demand_pricing
+export NoDepotNoCapCGSolver, NoDepotDemandCGSolver
+export NoDepotRoute, NoDepotDuals, NoDepotPool
+export solve_nodepot_nocap_pricing, solve_nodepot_demand_pricing
 
 # ── Benchmarking ──────────────────────────────────────────────────────────────
 export BenchmarkResult, run_benchmark, run_benchmark_suite
@@ -67,6 +70,13 @@ include("solvers/split_demand_cg/master_lp.jl")
 include("solvers/split_demand_cg/master_ip.jl")
 include("solvers/split_demand_cg/solution_builder.jl")
 include("solvers/split_demand_cg/sd_demand_cg_solver.jl")
+
+include("solvers/no_depot_cg/types.jl")
+include("solvers/no_depot_cg/pricing.jl")
+include("solvers/no_depot_cg/master_lp.jl")
+include("solvers/no_depot_cg/master_ip.jl")
+include("solvers/no_depot_cg/solution_builder.jl")
+include("solvers/no_depot_cg/no_depot_cg_solver.jl")
 
 include("benchmarking/benchmark.jl")
 
